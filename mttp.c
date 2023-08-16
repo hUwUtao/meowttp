@@ -18,94 +18,69 @@
 #include <sys/stat.h>
 #include <time.h>
 // socket
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-// ugh
-#define WORKDIR "/www"
-#define BSIZE 128 // reasonable system line right?
+#include "utils.h"
 
-void header(int sockfd, unsigned long size) {
+// ugh
+#ifdef __BUILD__
+#else
+#define __BUILD__ "undefined"
+#endif
+#define BSIZE 8192
+
+// macros for chaos
+#define snd send(sck, buf, strlen(buf), 0);
+#define header(size) send_header(sck, size);
+
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
+#define bprintf(...)                                                           \
+  sprintf(buf, __VA_ARGS__);                                                   \
+  snd;
+#define logup if (getenv("MTTP_LOG") != NULL)
+
+void send_header(int sck, unsigned long size) {
   time_t rawtime = time(NULL);
   struct tm *tm = gmtime(&rawtime);
   char buf[BSIZE];
-  strftime(buf, sizeof buf, "Date: %a, %d %b %Y %H:%M:%S %Z\r\n", tm);
-  send(sockfd, buf, strlen(buf), 0);
 
-  sprintf(buf, "Content-Length: %ld\r\n", size);
-  send(sockfd, buf, strlen(buf), 0);
-
-  sprintf(buf, "Server: mttp/%s\r\n", __BUILD__);
-  send(sockfd, buf, strlen(buf), 0);
-
-  sprintf(buf, "\r\n");
-  send(sockfd, buf, strlen(buf), 0);
-  return;
+  strftime(buf, BSIZE, "Date: %a, %d %b %Y %H:%M:%S %Z\r\n", tm);
+  snd;
+  bprintf("Content-Length: %ld\r\n", size);
+  bprintf("Server: mttp/%s\r\n", __BUILD__);
+  bprintf("Connection: close\r\n");
 }
 
-void handle_request(int sockfd, char *path, struct sockaddr_in addr) {
+void handle_request(int sck, char *path, struct sockaddr_in addr) {
   char buf[BSIZE];
   struct stat sb;
   FILE *fp = fopen(path, "r");
 
   if (stat(path, &sb) == -1) {
-    sprintf(buf, "HTTP/1.1 404 Not Found\r\n");
-    send(sockfd, buf, strlen(buf), 0);
-    header(sockfd, 0);
+    bprintf("HTTP/1.1 404 Not Found\r\n");
+    header(0);
   }
   // weird?
-  else if (fp == NULL) {
-    sprintf(buf, "HTTP/1.1 403 Forbidden\r\n");
-    send(sockfd, buf, strlen(buf), 0);
-    header(sockfd, 0);
+  else if (fp == NULL || !(sb.st_mode & __S_IFREG)) {
+    bprintf("HTTP/1.1 403 Forbidden\r\n");
+    header(0);
   } else {
 
-    sprintf(buf, "HTTP/1.1 200 OK\r\n");
-    send(sockfd, buf, strlen(buf), 0);
+    bprintf("HTTP/1.1 200 OK\r\n");
 
-    header(sockfd, sb.st_size);
+    bprintf("Content-Type: %s\r\n", get_mime_type(path));
+    header(sb.st_size);
 
-    while (fgets(buf, sizeof buf, fp) != NULL) {
-      send(sockfd, buf, strlen(buf), 0);
+    bprintf("\r\n");
+
+    while (fread(buf, 1, BSIZE, fp)) {
+      send(sck, buf, BSIZE, 0);
+      logup printf("BUFFERING at %ld\r\n", ftell(fp));
     }
 
     fclose(fp);
-  }
-}
-
-void sim(char *path) {
-  int n = strlen(path), top = -1;
-  char *stack[PATH_MAX];
-  for (int i = 0; i < n; i++) {
-    if (path[i] == '/')
-      continue;
-    if (path[i] == '.') {
-      if (i + 1 < n && path[i + 1] == '.') {
-        if (top >= 0) {
-          top--;
-        }
-        i++;
-      }
-      continue;
-    }
-    int j = i;
-    while (j < n && path[j] != '/') {
-      j++;
-    }
-    char *dir = (char *)malloc(j - i + 1);
-    strncpy(dir, path + i, j - i);
-    dir[j - i] = '\0';
-    stack[++top] = dir;
-    i = j;
-  }
-  if (top == -1) {
-    path = "/";
-  } else {
-    for (int i = 0; i <= top; i++) {
-      strcat(path, "/");
-      strcat(path, stack[i]);
-      free(stack[i]);
-    }
   }
 }
 
@@ -148,7 +123,7 @@ int main() {
 
   // bind
   while (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0) {
-    printf("bind failed %d\r\n", ret);
+    printf("bind failed %d times\r\n", ret);
     ret++;
     if (ret > 32)
       return 1;
@@ -164,19 +139,17 @@ int main() {
     // pipin
     memset(client_message, '\0', sizeof client_message);
 
-    // it might useful anyway
-    recv(client_sock, client_message, 2000, 0);
+    recv(client_sock, client_message, PATH_MAX, 0);
 
     // get only
     if (strncmp("GET", client_message, 3) == 0) {
       char *path = strtok(client_message, " ");
       path = strtok(NULL, " ");
-      // sim(path);
+      logup printf("%s//%s\n", inet_ntoa(client.sin_addr), path);
+      strdecode(path, path); // not to chaos later
+      spth(path, path);
 
       prepend(path, workdir);
-      if (getenv("MTTP_LOG") != NULL)
-        printf("/%s\n", path); // TODO: Implement sockaddr for this (probably
-                               // not a goverment's request XD)
 
       handle_request(client_sock, path, client);
     }

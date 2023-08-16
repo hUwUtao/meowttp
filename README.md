@@ -8,8 +8,11 @@ a minimalistic http server written in C. there is no args, only enviroment varia
 
 ## Will be a feature
 - [ ] Directory traversial (use chroot as temporary fix, the executable is static tho)
-- [ ] Media stream support
+- [ ] Partial
 - [ ] Index
+
+## Issues
+- [ ] Not yet the partial (well this cause big files prune)
 
 ## Manual
 

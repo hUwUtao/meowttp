@@ -1,9 +1,9 @@
 CC = gcc
-VERSION = 1.0
-FLAGS = -static -D'__BUILD__="$(VERSION)"'
+VERSION = 1.1
+FLAGS = -static -s -D'__BUILD__="$(VERSION)"'
 CFLAGS = -O3 -Wall $(FLAGS)
 
-SRCS = mttp.c
+SRCS = mttp.c utils.c
 OBJS = $(SRCS:.c=.o)
 PROG = meowttp
 
